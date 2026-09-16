@@ -575,6 +575,11 @@ describe('demo scaffold', () => {
 
       process.env.COPPERHEAD_DEMO_DIR = override;
       expect(defaultDemoDir()).toBe(override);
+
+      // An empty-but-set override (easy to produce from a shell script or a
+      // CI env block) must fall back to the default, not resolve to cwd.
+      process.env.COPPERHEAD_DEMO_DIR = '';
+      expect(defaultDemoDir()).toBe(path.join(process.cwd(), 'demo-runs/usb-c-breakout'));
     } finally {
       process.chdir(originalCwd);
       if (originalOverride === undefined) delete process.env.COPPERHEAD_DEMO_DIR;

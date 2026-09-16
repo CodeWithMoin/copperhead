@@ -44,9 +44,14 @@ export function defaultBriefPath(): string {
 }
 
 export function defaultDemoDir(): string {
-  return (
-    process.env.COPPERHEAD_DEMO_DIR ?? path.resolve(process.cwd(), 'demo-runs/usb-c-breakout')
-  );
+  // `?.trim()` also catches an empty-but-set override (`COPPERHEAD_DEMO_DIR=`,
+  // easy to produce from a shell script or a CI env block): `??` alone only
+  // catches null/undefined, so an empty string would fall through to
+  // `path.resolve('')` at the call site and scaffold into the user's cwd.
+  const override = process.env.COPPERHEAD_DEMO_DIR?.trim();
+  return override
+    ? path.resolve(process.cwd(), override)
+    : path.resolve(process.cwd(), 'demo-runs/usb-c-breakout');
 }
 
 /** Marker identifying a directory scaffolded by `copperhead demo`. */
