@@ -233,6 +233,41 @@ describe('a turn cut for fabricated tool results (#320)', () => {
   });
 });
 
+describe('a turn that left tool calls undispatched (#306)', () => {
+  it('names them after the real results and records them in the transcript', async () => {
+    const { repo, cleanup } = await tempFixtureRepo();
+    try {
+      const seen: Msg[][] = [];
+      const turns: Turn[] = [
+        { ...spin('a'), undispatched: { unavailable: ['write_file'], malformed: [] } },
+        finishTurn('refuse', 'stop after one turn'),
+      ];
+      const provider: Provider = {
+        name: 'scripted',
+        chat: async (messages) => {
+          seen.push([...messages]);
+          return turns[Math.min(seen.length - 1, turns.length - 1)]!;
+        },
+      };
+      const res = await runAgentLoop(loopOpts(repo, provider, [], { maxTurns: 3 }));
+      expect(res.outcome).toBe('refused');
+
+      const second = seen[1]!;
+      const toolAt = second.findIndex((m) => m.role === 'tool' && m.toolCallId === 'a');
+      const steerAt = second.findIndex((m) => m.role === 'user' && typeof m.content === 'string' && m.content.includes('did not run'));
+      expect(toolAt).toBeGreaterThanOrEqual(0);
+      expect(steerAt).toBeGreaterThan(toolAt);
+      // No proposal validated in this run, so write_file is still locked.
+      expect(second[steerAt]!.content).toMatch(/"write_file": not in the tool catalog\. .*propose_change, then validate_change/);
+
+      const events = await transcriptEvents(res.transcriptDir);
+      expect(events.find((e) => e.type === 'undispatched-calls')?.data).toEqual({ unavailable: ['write_file'], malformed: [] });
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
 describe('redaction of metadata surfaces (task 6.1)', () => {
   it('an sk- secret in a metadata field is redacted on both surfaces (AC-8.10)', async () => {
     const { repo, cleanup } = await tempFixtureRepo();

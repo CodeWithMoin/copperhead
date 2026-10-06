@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseToolCalls } from '../src/agent/providers/tool-protocol.js';
+import { parseToolCalls, renderUndispatched } from '../src/agent/providers/tool-protocol.js';
 
 const catalog = new Set(['move_footprint', 'run_drc', 'write_file']);
 const ids = () => {
@@ -90,5 +90,50 @@ describe('parseToolCalls — CRLF replies', () => {
     const parsed = parseToolCalls(reply, ids(), catalog);
     expect(parsed.toolCalls.map((c) => c.name)).toEqual(['move_footprint']);
     expect(parsed.notice).toMatch(/that you wrote yourself/);
+  });
+});
+
+describe('parseToolCalls — undispatched calls in a mixed reply (#306)', () => {
+  it('reports a call for a tool outside the catalog written next to calls that ran', () => {
+    const reply = [call('run_drc'), call('edit_file', { path: 'docs/SPEC.md' }), call('edit_file', { path: 'docs/BOM.md' })].join('\n');
+    const parsed = parseToolCalls(reply, ids(), catalog);
+    expect(parsed.toolCalls.map((c) => c.name)).toEqual(['run_drc']);
+    expect(parsed.undispatched).toEqual({ unavailable: ['edit_file'], malformed: [] });
+  });
+
+  it('reports a catalog call that is one brace short next to calls that ran', () => {
+    const broken = '```json\n{"tool": "move_footprint", "args": {"ref": "R1"}\n```';
+    const parsed = parseToolCalls([call('run_drc'), broken].join('\n'), ids(), catalog);
+    expect(parsed.toolCalls.map((c) => c.name)).toEqual(['run_drc']);
+    expect(parsed.undispatched).toEqual({ unavailable: [], malformed: ['move_footprint'] });
+  });
+
+  it('reports nothing when every call in the reply ran', () => {
+    const reply = [call('run_drc'), call('write_file', { path: 'a.md', content: 'see {"tool": "edit_file"} above' })].join('\n');
+    const parsed = parseToolCalls(reply, ids(), catalog);
+    expect(parsed.toolCalls).toHaveLength(2);
+    expect(parsed.undispatched).toBeUndefined();
+  });
+
+  it('leaves a reply with no dispatched call to the nudge', () => {
+    const parsed = parseToolCalls(call('edit_file'), ids(), catalog);
+    expect(parsed.toolCalls).toEqual([]);
+    expect(parsed.undispatched).toBeUndefined();
+    expect(parsed.nudge).toMatch(/not in this turn's tool catalog/);
+  });
+});
+
+describe('renderUndispatched (#306)', () => {
+  it('asks for the calls again when the same reply unlocked the tool', () => {
+    const message = renderUndispatched({ unavailable: ['write_file'], malformed: [] }, new Set(['write_file', 'run_drc']));
+    expect(message).toMatch(/"write_file": not in the tool catalog when you replied\. It is available now/);
+    expect(message).not.toMatch(/propose_change/);
+  });
+
+  it('points at propose_change and validate_change while the tool is still locked', () => {
+    const message = renderUndispatched({ unavailable: ['write_file', 'edit_file'], malformed: ['run_drc'] }, new Set(['run_drc']));
+    expect(message).toMatch(/"write_file", "edit_file": not in the tool catalog\. .*propose_change, then validate_change/);
+    expect(message).toMatch(/"run_drc": a call did not parse as valid JSON/);
+    expect(message).toMatch(/Do not assume a result/);
   });
 });
