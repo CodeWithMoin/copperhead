@@ -669,7 +669,7 @@ async function runWithProviders(opts: RunOptions, providers: Set<Provider>): Pro
     if (res.undispatched) {
       const available = new Set(availableTools(ctx).map((t) => t.name));
       await transcript.event('undispatched-calls', { ...res.undispatched });
-      messages.push({ role: 'user', content: renderUndispatched(res.undispatched, available) });
+      messages.push({ role: 'user', content: renderUndispatched(res.undispatched, available, ctx.editsUnlocked) });
     }
 
     // Not when this same turn went on to finish: finish is approved only after

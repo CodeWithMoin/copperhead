@@ -115,6 +115,13 @@ describe('parseToolCalls — undispatched calls in a mixed reply (#306)', () => 
     expect(parsed.undispatched).toBeUndefined();
   });
 
+  it('does not report narration that quotes a call or echoes the protocol template', () => {
+    const narration = 'Next I will send {"tool": "<tool_name>", "args": { ... }} for each file, then "tool": "write_file".';
+    const parsed = parseToolCalls([call('run_drc'), narration].join('\n'), ids(), catalog);
+    expect(parsed.toolCalls.map((c) => c.name)).toEqual(['run_drc']);
+    expect(parsed.undispatched).toBeUndefined();
+  });
+
   it('leaves a reply with no dispatched call to the nudge', () => {
     const parsed = parseToolCalls(call('edit_file'), ids(), catalog);
     expect(parsed.toolCalls).toEqual([]);
@@ -125,15 +132,27 @@ describe('parseToolCalls — undispatched calls in a mixed reply (#306)', () => 
 
 describe('renderUndispatched (#306)', () => {
   it('asks for the calls again when the same reply unlocked the tool', () => {
-    const message = renderUndispatched({ unavailable: ['write_file'], malformed: [] }, new Set(['write_file', 'run_drc']));
+    const message = renderUndispatched({ unavailable: ['write_file'], malformed: [] }, new Set(['write_file', 'run_drc']), true);
     expect(message).toMatch(/"write_file": not in the tool catalog when you replied\. It is available now/);
     expect(message).not.toMatch(/propose_change/);
   });
 
   it('points at propose_change and validate_change while the tool is still locked', () => {
-    const message = renderUndispatched({ unavailable: ['write_file', 'edit_file'], malformed: ['run_drc'] }, new Set(['run_drc']));
+    const message = renderUndispatched({ unavailable: ['write_file', 'edit_file'], malformed: ['run_drc'] }, new Set(['run_drc']), false);
     expect(message).toMatch(/"write_file", "edit_file": not in the tool catalog\. .*propose_change, then validate_change/);
     expect(message).toMatch(/"run_drc": a call did not parse as valid JSON/);
     expect(message).toMatch(/Do not assume a result/);
+  });
+
+  it('uses the plural when the same reply unlocked several tools', () => {
+    const message = renderUndispatched({ unavailable: ['write_file', 'edit_file'], malformed: [] }, new Set(['write_file', 'edit_file']), true);
+    expect(message).toMatch(/"write_file", "edit_file": not in the tool catalog when you replied\. They are available now/);
+  });
+
+  it('calls a name unknown, and does not ask for a second proposal, once edits are unlocked', () => {
+    const available = new Set(['run_drc', 'edit_file']);
+    const message = renderUndispatched({ unavailable: ['edit_files'], malformed: [] }, available, true);
+    expect(message).toMatch(/"edit_files": not a tool in the catalog\. Use one of the available tools: run_drc, edit_file\./);
+    expect(message).not.toMatch(/propose_change/);
   });
 });

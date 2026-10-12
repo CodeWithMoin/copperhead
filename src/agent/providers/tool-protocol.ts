@@ -146,10 +146,12 @@ function detectMalformedCall(text: string, catalog: Set<string>): string | undef
  * `detectMalformedCall` only speaks when nothing parsed; in a mixed reply the
  * off-catalog and near-miss calls were dropped to prose with no message, so the
  * model assumed they ran. `prose` is the reply with the dispatched calls removed,
- * so a call that did run is never reported.
+ * so a call that did run is never reported. Only a `"tool"` key that opens an
+ * object and names an identifier counts: narration that quotes a call, or an echo
+ * of the protocol template (`"<tool_name>"`), is not a call that failed to run.
  */
 function detectUndispatched(prose: string, catalog: Set<string>): UndispatchedCalls | undefined {
-  const re = /"tool"\s*:\s*"([^"]+)"/g;
+  const re = /\{\s*"tool"\s*:\s*"([A-Za-z_][A-Za-z0-9_]*)"/g;
   const unavailable: string[] = [];
   const malformed: string[] = [];
   let m: RegExpExecArray | null;
@@ -165,11 +167,14 @@ function detectUndispatched(prose: string, catalog: Set<string>): UndispatchedCa
  * The message for the calls `detectUndispatched` found. `available` is the tool
  * catalog AFTER the reply's calls ran: a `validate_change` in the same reply may
  * have unlocked the edit tools, and then the steer is to re-send, not to propose.
+ * The edit lock is the only gate on the catalog, so once `editsUnlocked` a name
+ * that is still absent is not locked, it does not exist: say so and print the
+ * catalog, since a second propose_change would open a second change.
  */
-export function renderUndispatched(calls: UndispatchedCalls, available: Set<string>): string {
+export function renderUndispatched(calls: UndispatchedCalls, available: Set<string>, editsUnlocked: boolean): string {
   const quote = (names: string[]) => names.map((n) => `"${n}"`).join(', ');
   const unlocked = calls.unavailable.filter((n) => available.has(n));
-  const locked = calls.unavailable.filter((n) => !available.has(n));
+  const absent = calls.unavailable.filter((n) => !available.has(n));
   const lines = ['Some tool calls in your last reply did not run, so nothing they describe happened:'];
   if (unlocked.length) {
     lines.push(
@@ -177,9 +182,14 @@ export function renderUndispatched(calls: UndispatchedCalls, available: Set<stri
         `${unlocked.length > 1 ? 'They are' : 'It is'} available now, so send those calls again.`,
     );
   }
-  if (locked.length) {
+  if (absent.length && editsUnlocked) {
     lines.push(
-      `- ${quote(locked)}: not in the tool catalog. Edit and drafting tools are withheld until a ` +
+      `- ${quote(absent)}: not ${absent.length > 1 ? 'tools' : 'a tool'} in the catalog. ` +
+        `Use one of the available tools: ${[...available].join(', ')}.`,
+    );
+  } else if (absent.length) {
+    lines.push(
+      `- ${quote(absent)}: not in the tool catalog. Edit and drafting tools are withheld until a ` +
         'proposal validates: call propose_change, then validate_change, and send those calls in a later reply.',
     );
   }
